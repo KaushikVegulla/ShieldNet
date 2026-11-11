@@ -1,0 +1,27 @@
+# Render Blueprint — ShieldNet backend + PostgreSQL.
+# Render dashboard -> New -> Blueprint -> connect this repo -> Apply.
+# Creates a free web service (Docker, from backend/Dockerfile) wired to a
+# free PostgreSQL database via DATABASE_URL. See docs/HOSTING.md.
+services:
+  - type: web
+    name: shieldnet-backend
+    env: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: shieldnet-db
+          property: connectionString
+      - key: RISK_MONITOR_THRESHOLD
+        value: "40"
+      - key: RISK_BLOCK_THRESHOLD
+        value: "75"
+
+databases:
+  - name: shieldnet-db
+    databaseName: shieldnet
+    user: shieldnet
+    plan: free
