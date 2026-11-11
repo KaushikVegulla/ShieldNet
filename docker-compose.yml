@@ -1,4 +1,4 @@
-# ShieldNet — PostgreSQL + ModSecurity WAF in front of a demo app + FastAPI backend.
+# ShieldNet — PostgreSQL + FastAPI backend + ModSecurity WAF in front of the demo target app.
 # Dashboard runs on Vercel (Phase 5) and calls the backend API.
 services:
   db:
@@ -30,21 +30,32 @@ services:
         condition: service_healthy
 
   target-app:
-    # Stand-in demo app for Phase 0/2. Replaced by target-app/ build in Phase 2.
-    image: nginx:alpine
+    build: ./target-app
     expose:
-      - "80"
+      - "5000"
 
   waf:
     image: owasp/modsecurity-crs:nginx
     environment:
       PROXY: "1"
-      BACKEND: http://target-app:80
+      BACKEND: http://target-app:5000
+      # OWASP CRS tuning — start at paranoia 1, blocking mode
+      PARANOIA: "1"
+      BLOCKING_PARANOIA: "1"
+      ANOMALY_INBOUND: "5"
+      ANOMALY_OUTBOUND: "4"
+      # JSON audit log — shipped to the backend by backend/scripts/parse_audit_log.py
       MODSEC_AUDIT_LOG: /var/log/modsec_audit.log
+      MODSEC_AUDIT_LOG_FORMAT: JSON
     ports:
       - "${WAF_PORT:-8080}:8080"
+    volumes:
+      - ./waf/rules/REQUEST-900-SHIELDNET-BEFORE-CRS.conf:/etc/modsecurity.d/REQUEST-900-SHIELDNET-BEFORE-CRS.conf:ro
+      - ./waf/rules/REQUEST-949-SHIELDNET-AFTER-CRS.conf:/etc/modsecurity.d/REQUEST-949-SHIELDNET-AFTER-CRS.conf:ro
+      - modsec-logs:/var/log
     depends_on:
       - target-app
 
 volumes:
   postgres-data:
+  modsec-logs:
