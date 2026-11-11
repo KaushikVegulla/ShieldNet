@@ -16,6 +16,12 @@ pytest ml/tests                               # feature-extraction tests
   copy — keep them in sync (`cp ml/features.py backend/app/features.py`).
 - `train.py` — trains Random Forest and XGBoost, keeps the better F1,
   saves it as a versioned joblib bundle.
+- `train_anomaly.py` — trains an Isolation Forest on benign rows only and
+  calibrates its raw decision values to a 0–100 anomaly score. On the
+  synthetic starter data: benign mean 25.7 vs. attack mean 60.4, with 79% of
+  attacks scoring over 40 — but also 32% of benign, which is exactly why the
+  anomaly signal carries the smallest hybrid weight (0.15). Metrics are in
+  `ml/models/anomaly_metrics.json`.
 - The backend serves the model when `MODEL_PATH` points at the artefact
   (plus `backend/requirements-ml.txt` installed). Without a model,
   `/analyze` honestly returns `ml_score: null`.

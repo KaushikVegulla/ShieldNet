@@ -1,0 +1,9 @@
+{
+  "version": "anomaly-v1",
+  "trained_on_benign_rows": 1200,
+  "benign_score_mean": 25.65,
+  "attack_score_mean": 60.38,
+  "attacks_scoring_over_40": 0.79,
+  "benign_scoring_over_40": 0.3208,
+  "note": "Synthetic starter data \u2014 same caveat as ml/README.md."
+}

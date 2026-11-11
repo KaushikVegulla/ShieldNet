@@ -77,7 +77,7 @@ The dashboard is added in Phase 5 — see
 - **Phase 1** — FastAPI backend: request logging to PostgreSQL, `/analyze` endpoint ✅
 - **Phase 2** — ModSecurity + OWASP CRS live in front of the demo target app ✅
 - **Phase 3** — ML detection: feature extraction + XGBoost / Random Forest training ✅
-- **Phase 4** — Anomaly detection + hybrid scoring engine
+- **Phase 4** — Anomaly detection + hybrid scoring engine ✅
 - **Phase 5** — React dashboard on Vercel
 - **Phase 6** — End-to-end attack tests (SQLi, XSS, path traversal), demo + docs
 

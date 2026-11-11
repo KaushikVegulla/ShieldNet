@@ -15,16 +15,20 @@ Logs HTTP requests to PostgreSQL, scores them, and serves the dashboard APIs.
 
 ## Scoring
 
-`/analyze` combines:
-- a transparent baseline pattern scorer (`app/scoring.py`): SQLi / XSS /
-  traversal / RCE / probing patterns plus the ModSecurity CRS score
-- the ML score (`app/ml_scoring.py`) when a trained model is loaded via
-  `MODEL_PATH` (+ `requirements-ml.txt`); otherwise `ml_score` is `null`
+`/analyze` runs all three detection layers into the hybrid engine
+(`app/hybrid.py`):
 
-Interim risk combination: rule alone, or `0.6*rule + 0.4*ML` when ML is
-present. Thresholds: `>= 40` monitor, `>= 75` block (configurable via env).
-Phase 4 replaces this with the full hybrid engine including the anomaly
-score (`anomaly_score` is still `null` until then).
+| Signal | Source | Weight |
+|---|---|---|
+| Rule score | `app/scoring.py` patterns + ModSecurity CRS score | 0.50 |
+| ML score | `app/ml_scoring.py`, model from `MODEL_PATH` | 0.35 |
+| Anomaly score | `app/anomaly_scoring.py`, model from `ANOMALY_MODEL_PATH` | 0.15 |
+
+Weights renormalise over whichever signals are loaded — with no models
+installed the backend still works on rules alone and returns `null` ML /
+anomaly scores rather than invented numbers. A rule score ≥ 90 floors the
+risk at 85 so known-bad patterns can't be diluted. Thresholds: `>= 40`
+monitor, `>= 75` block (configurable via env).
 
 ## Run
 

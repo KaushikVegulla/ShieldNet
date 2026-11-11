@@ -23,6 +23,12 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-shieldnet}:${POSTGRES_PASSWORD:-change-me-in-env}@db:5432/${POSTGRES_DB:-shieldnet}
       RISK_MONITOR_THRESHOLD: ${RISK_MONITOR_THRESHOLD:-40}
       RISK_BLOCK_THRESHOLD: ${RISK_BLOCK_THRESHOLD:-75}
+      # Trained models (train with ml/train.py + ml/train_anomaly.py first;
+      # without them /analyze simply returns null ML/anomaly scores)
+      MODEL_PATH: /app/models/shieldnet_model.joblib
+      ANOMALY_MODEL_PATH: /app/models/anomaly_model.joblib
+    volumes:
+      - ./ml/models:/app/models:ro
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     depends_on:
