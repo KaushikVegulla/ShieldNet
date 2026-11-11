@@ -1,0 +1,38 @@
+# ShieldNet — Phase 0 stack: PostgreSQL + ModSecurity WAF in front of a demo app.
+# Backend (FastAPI) service is added in Phase 1, dashboard runs on Vercel (Phase 5).
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-shieldnet}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-in-env}
+      POSTGRES_DB: ${POSTGRES_DB:-shieldnet}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-shieldnet}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  target-app:
+    # Stand-in demo app for Phase 0/2. Replaced by target-app/ build in Phase 2.
+    image: nginx:alpine
+    expose:
+      - "80"
+
+  waf:
+    image: owasp/modsecurity-crs:nginx
+    environment:
+      PROXY: "1"
+      BACKEND: http://target-app:80
+      MODSEC_AUDIT_LOG: /var/log/modsec_audit.log
+    ports:
+      - "${WAF_PORT:-8080}:8080"
+    depends_on:
+      - target-app
+
+volumes:
+  postgres-data:

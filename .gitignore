@@ -1,0 +1,30 @@
+# Environment / secrets
+.env
+*.env
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# ML artefacts & data
+ml/models/*.joblib
+ml/models/*.pkl
+ml/data/*.csv
+!ml/data/.gitkeep
+
+# Node / frontend
+node_modules/
+frontend/dist/
+frontend/.env.local
+
+# Docker volumes / local data
+postgres-data/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
