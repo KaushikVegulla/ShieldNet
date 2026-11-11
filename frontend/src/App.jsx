@@ -41,7 +41,8 @@ function AreaChart({ seriesA, seriesB }) {
 function Donut({ data }) {
   const colors = { sqli: "#e5484d", xss: "#f5a524", rce: "#2f7bff", traversal: "#8e4ec6", probing: "#30a46c", anomaly: "#12a594" };
   const entries = Object.entries(data || {}).sort((a, b) => b[1] - a[1]);
-  const total = Math.max(1, entries.reduce((s, [, v]) => s + v, 0));
+  const sum = entries.reduce((s, [, v]) => s + v, 0);
+  const total = Math.max(1, sum); // divisor only — the centre label shows the real sum
   let acc = 0;
   const R = 52, C = 2 * Math.PI * R;
   return (
@@ -55,7 +56,7 @@ function Donut({ data }) {
               strokeDashoffset={-start * C} transform="rotate(-90 70 70)" />
           );
         })}
-        <text x="70" y="66" textAnchor="middle" className="donut-num">{total}</text>
+        <text x="70" y="66" textAnchor="middle" className="donut-num">{sum}</text>
         <text x="70" y="84" textAnchor="middle" className="donut-sub">attacks</text>
       </svg>
       <div className="donut-legend">
