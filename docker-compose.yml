@@ -45,6 +45,9 @@ services:
     environment:
       PROXY: "1"
       BACKEND: http://target-app:5000
+      # Deployment lifecycle (docs/DEPLOYMENT_LIFECYCLE.md):
+      # start with DetectionOnly (learning mode, log-only), switch to On for blocking.
+      MODSEC_RULE_ENGINE: ${WAF_RULE_ENGINE:-On}
       # OWASP CRS tuning — start at paranoia 1, blocking mode
       PARANOIA: "1"
       BLOCKING_PARANOIA: "1"

@@ -5,6 +5,13 @@ The `waf` service in the root `docker-compose.yml` runs the official
 `target-app/` (port 5000). All traffic to http://localhost:8080 goes through
 ModSecurity first.
 
+## Rollout lifecycle
+
+ShieldNet follows the standard WAF lifecycle — learning mode
+(`WAF_RULE_ENGINE=DetectionOnly`, log-only) → tuning on real logs →
+enforcement (`WAF_RULE_ENGINE=On`) → ongoing monitoring/retraining.
+Full checklist: [../docs/DEPLOYMENT_LIFECYCLE.md](../docs/DEPLOYMENT_LIFECYCLE.md).
+
 ## Configuration
 
 Set via environment in `docker-compose.yml`:
