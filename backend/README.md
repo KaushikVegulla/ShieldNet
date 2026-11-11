@@ -13,15 +13,18 @@ Logs HTTP requests to PostgreSQL, scores them, and serves the dashboard APIs.
 | GET | `/detections` | Recent detections |
 | GET | `/stats` | Totals by decision and attack type (dashboard) |
 
-## Scoring (Phase 1)
+## Scoring
 
-`/analyze` currently uses a transparent baseline pattern scorer
-(`app/scoring.py`): SQLi / XSS / traversal / RCE / probing patterns plus the
-ModSecurity CRS score, combined into a 0–100 risk score.
-Thresholds: `>= 40` monitor, `>= 75` block (configurable via env).
+`/analyze` combines:
+- a transparent baseline pattern scorer (`app/scoring.py`): SQLi / XSS /
+  traversal / RCE / probing patterns plus the ModSecurity CRS score
+- the ML score (`app/ml_scoring.py`) when a trained model is loaded via
+  `MODEL_PATH` (+ `requirements-ml.txt`); otherwise `ml_score` is `null`
 
-Phase 3 adds the ML score (XGBoost / Random Forest) and Phase 4 the anomaly
-score + full hybrid combination. `ml_score` / `anomaly_score` are `null` until then.
+Interim risk combination: rule alone, or `0.6*rule + 0.4*ML` when ML is
+present. Thresholds: `>= 40` monitor, `>= 75` block (configurable via env).
+Phase 4 replaces this with the full hybrid engine including the anomaly
+score (`anomaly_score` is still `null` until then).
 
 ## Run
 

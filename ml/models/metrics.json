@@ -1,0 +1,21 @@
+{
+  "dataset_rows": 2400,
+  "best_model": "random_forest",
+  "version": "ml-v1",
+  "results": {
+    "random_forest": {
+      "model": "random_forest",
+      "accuracy": 1.0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+    },
+    "xgboost": {
+      "model": "xgboost",
+      "accuracy": 1.0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0
+    }
+  }
+}

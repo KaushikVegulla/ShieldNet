@@ -4,7 +4,7 @@ from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
-from . import models, schemas, scoring
+from . import ml_scoring, models, schemas, scoring
 from .db import Base, engine, get_db
 
 Base.metadata.create_all(bind=engine)
@@ -52,20 +52,23 @@ def ingest(payload: schemas.RequestIn, db: Session = Depends(get_db)):
 def analyze(payload: schemas.RequestIn, db: Session = Depends(get_db)):
     """Log a request, score it, store a detection, return the decision.
 
-    Phase 1: risk = baseline rule score. ML (Phase 3) and anomaly
-    (Phase 4) scores are null until those phases land.
+    Risk combination is interim until the Phase 4 hybrid engine:
+    rule score alone, or 0.6*rule + 0.4*ML when a trained model is loaded.
+    Anomaly score (Phase 4) is still null.
     """
     log = _store_request(db, payload)
     result = scoring.rule_score_for(payload.uri, payload.body, payload.modsec_score)
-    risk = result.rule_score
+    ml = ml_scoring.score(payload.method, payload.uri, payload.body, payload.headers)
+    risk = result.rule_score if ml is None else round(0.6 * result.rule_score + 0.4 * ml, 2)
     detection = models.Detection(
         request_id=log.id,
         rule_score=result.rule_score,
-        ml_score=None,
+        ml_score=ml,
         anomaly_score=None,
         risk_score=risk,
         decision=scoring.decide(risk),
         attack_type=result.attack_type,
+        model_version=ml_scoring.model_version(),
     )
     db.add(detection)
     db.commit()

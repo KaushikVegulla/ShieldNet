@@ -1,0 +1,6 @@
+# Optional: install in the backend only when serving ML scores.
+# The backend runs fine without these — /analyze just returns ml_score=null.
+scikit-learn>=1.5
+xgboost>=2.1
+pandas>=2.2
+joblib>=1.4
