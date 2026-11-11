@@ -45,6 +45,13 @@ def test_analyze_xss_request_scores_high():
     assert body["decision"] in ("monitor", "block")
 
 
+def test_model_metrics_shape():
+    r = client.get("/model-metrics")
+    assert r.status_code == 200
+    body = r.json()
+    assert "classifier" in body and "anomaly" in body
+
+
 def test_ingest_and_stats():
     r = client.post("/ingest", json={"method": "GET", "uri": "/about"})
     assert r.status_code == 201

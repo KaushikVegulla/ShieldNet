@@ -109,6 +109,34 @@ def list_detections(limit: int = 50, db: Session = Depends(get_db)):
     )
 
 
+@app.get("/model-metrics")
+def model_metrics():
+    """Training metrics for the dashboard, read from the models directory.
+
+    Looks next to MODEL_PATH / ANOMALY_MODEL_PATH for metrics.json and
+    anomaly_metrics.json (written by ml/train.py / ml/train_anomaly.py).
+    Returns nulls when no metrics files are present.
+    """
+    import json
+    import os
+
+    def _read(env_var: str, filename: str):
+        path = os.environ.get(env_var, "")
+        if not path:
+            return None
+        candidate = os.path.join(os.path.dirname(path), filename)
+        try:
+            with open(candidate, encoding="utf-8") as fh:
+                return json.load(fh)
+        except (OSError, json.JSONDecodeError):
+            return None
+
+    return {
+        "classifier": _read("MODEL_PATH", "metrics.json"),
+        "anomaly": _read("ANOMALY_MODEL_PATH", "anomaly_metrics.json"),
+    }
+
+
 @app.get("/stats", response_model=schemas.StatsOut)
 def stats(db: Session = Depends(get_db)):
     detections = db.query(models.Detection).all()
