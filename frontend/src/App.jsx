@@ -108,7 +108,7 @@ const BATTERY = [
   ["Benign product page", "allow"], ["Benign search", "allow"], ["Benign login", "allow"],
 ];
 
-export default function App() {
+function Dashboard({ onLogout }) {
   const [view, setView] = useState("overview");
   const [data, setData] = useState(null);
   const [query, setQuery] = useState("");
@@ -195,6 +195,7 @@ export default function App() {
             <div className="muted small">{data.demo ? "Backend unreachable" : "All layers active"}</div>
           </div>
         </div>
+        <button className="logout-btn" onClick={onLogout}>⎋ Logout · admin</button>
         <p className="tagline">Detect. Analyze. Prevent. Protect.</p>
       </aside>
 
@@ -398,4 +399,61 @@ export default function App() {
       </main>
     </div>
   );
+}
+
+/* ---------- Login gate (demo) ----------
+   Client-side gate in front of the console: one built-in demo account, the
+   session is kept in sessionStorage for the current tab. This is a UX gate,
+   NOT real security — the backend API has no authentication yet (see
+   docs/DEMO.md, known limitations). Real auth means backend-issued tokens. */
+const DEMO_ACCOUNT = { email: "admin@shieldnet.io", password: "shieldnet" };
+
+function Login({ onLogin }) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+
+  const submit = (e) => {
+    e.preventDefault();
+    if (email.trim().toLowerCase() === DEMO_ACCOUNT.email && password === DEMO_ACCOUNT.password) {
+      onLogin();
+    } else {
+      setError("Invalid email or password — use the demo credentials below.");
+    }
+  };
+
+  return (
+    <div className="login-wrap">
+      <form className="login-card" onSubmit={submit}>
+        <div className="brand">
+          <div className="brand-icon">🛡️</div>
+          <div><strong>ShieldNet</strong><span>AI-Powered WAF</span></div>
+        </div>
+        <h1>Sign in to the console</h1>
+        <p className="muted">Monitor threats, detections and WAF activity in real time.</p>
+        <label className="login-label">Email
+          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+            placeholder="admin@shieldnet.io" autoFocus required />
+        </label>
+        <label className="login-label">Password
+          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+            placeholder="••••••••" required />
+        </label>
+        {error && <p className="login-error">{error}</p>}
+        <button className="login-btn" type="submit">Sign In →</button>
+        <div className="login-hint">
+          Demo account — email <code>admin@shieldnet.io</code> · password <code>shieldnet</code>
+        </div>
+        <p className="muted small">Demo login gate for the console UI. The backend API is not protected by this sign-in yet.</p>
+      </form>
+    </div>
+  );
+}
+
+export default function App() {
+  const [authed, setAuthed] = useState(() => sessionStorage.getItem("shieldnet-auth") === "1");
+  if (!authed) {
+    return <Login onLogin={() => { sessionStorage.setItem("shieldnet-auth", "1"); setAuthed(true); }} />;
+  }
+  return <Dashboard onLogout={() => { sessionStorage.removeItem("shieldnet-auth"); setAuthed(false); }} />;
 }

@@ -12,7 +12,8 @@ docker compose up -d --build
 - Target app via WAF: http://localhost:8080
 - Backend API: http://localhost:8000 (`/docs` for Swagger)
 - Dashboard: `cd frontend && npm run dev` → http://localhost:5173
-  (or the Vercel deployment once linked)
+  (or the Vercel deployment). The console opens on a **login page** —
+  demo account: `admin@shieldnet.io` / `shieldnet` (logout is in the sidebar).
 
 ## 2. Demo script (5 minutes)
 
@@ -62,6 +63,9 @@ engine and re-verified.
 - **The anomaly model over-flags** (32% of benign synthetic traffic scores
   > 40; a benign login scored 81). That's why its hybrid weight is only
   0.15 and why it can't block on its own.
+- **The console login is a UI gate only** — one built-in demo account,
+  checked in the browser; the backend API itself has no authentication
+  yet. Production auth would be backend-issued tokens (e.g. JWT).
 - **The WAF-level script** (`tests/run_e2e.sh`) needs the Docker stack and
   is verified manually, not in CI.
 - This is an academic demonstration, not a production WAF.
