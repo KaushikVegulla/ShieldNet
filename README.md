@@ -62,18 +62,19 @@ shieldnet/
 
 ```bash
 cp .env.example .env
-docker compose up -d db waf target-app
-# WAF listens on http://localhost:8080 and proxies to the target app
+docker compose up -d --build
+# WAF on http://localhost:8080 (proxies to the target app)
+# Backend API on http://localhost:8000 — try GET /health, POST /analyze
 ```
 
-The backend and dashboard are added in later phases — see
+The dashboard is added in Phase 5 — see
 [docs/ROADMAP.md](docs/ROADMAP.md) and
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Roadmap
 
 - **Phase 0** — Repo scaffold, Docker Compose (PostgreSQL + ModSecurity) ✅
-- **Phase 1** — FastAPI backend: request logging to PostgreSQL, `/analyze` endpoint
+- **Phase 1** — FastAPI backend: request logging to PostgreSQL, `/analyze` endpoint ✅
 - **Phase 2** — ModSecurity + OWASP CRS live in front of the demo target app
 - **Phase 3** — ML detection: feature extraction + XGBoost / Random Forest training
 - **Phase 4** — Anomaly detection + hybrid scoring engine

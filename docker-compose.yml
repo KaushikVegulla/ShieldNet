@@ -1,5 +1,5 @@
-# ShieldNet — Phase 0 stack: PostgreSQL + ModSecurity WAF in front of a demo app.
-# Backend (FastAPI) service is added in Phase 1, dashboard runs on Vercel (Phase 5).
+# ShieldNet — PostgreSQL + ModSecurity WAF in front of a demo app + FastAPI backend.
+# Dashboard runs on Vercel (Phase 5) and calls the backend API.
 services:
   db:
     image: postgres:16-alpine
@@ -16,6 +16,18 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  backend:
+    build: ./backend
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-shieldnet}:${POSTGRES_PASSWORD:-change-me-in-env}@db:5432/${POSTGRES_DB:-shieldnet}
+      RISK_MONITOR_THRESHOLD: ${RISK_MONITOR_THRESHOLD:-40}
+      RISK_BLOCK_THRESHOLD: ${RISK_BLOCK_THRESHOLD:-75}
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
 
   target-app:
     # Stand-in demo app for Phase 0/2. Replaced by target-app/ build in Phase 2.
