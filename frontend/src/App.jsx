@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { API_BASE, fetchDashboardOrDemo } from "./api.js";
+import { API_BASE, analyzeRequest, fetchDashboardOrDemo } from "./api.js";
 
 /* ---------- small chart helpers (no chart library, pure SVG) ---------- */
 
@@ -97,9 +97,67 @@ const NAV = [
   ["live", "📊", "Live Monitoring"],
   ["threats", "🛡️", "Threat Detection"],
   ["intel", "🎯", "Attack Intelligence"],
+  ["scanner", "🔍", "Website Scanner"],
+  ["api", "🔌", "API Security"],
+  ["db", "🗄️", "Database Guard"],
+  ["assistant", "🤖", "AI Assistant"],
+  ["incidents", "🚨", "Incident Response"],
   ["reports", "📄", "Reports"],
   ["settings", "⚙️", "Settings"],
 ];
+
+const TYPE_LABELS = { sqli: "SQL Injection", xss: "XSS", rce: "Command Injection", traversal: "Path Traversal", probing: "Probing", anomaly: "Anomaly" };
+
+// Trend of the second half of a bucket series vs the first half (real data only).
+function trendPct(buckets) {
+  const mid = Math.floor(buckets.length / 2);
+  const a = buckets.slice(0, mid).reduce((s, v) => s + v, 0);
+  const b = buckets.slice(mid).reduce((s, v) => s + v, 0);
+  if (!a && !b) return null;
+  if (!a) return { pct: 100, up: true };
+  const pct = Math.round(((b - a) / a) * 100);
+  return { pct: Math.abs(pct), up: pct >= 0 };
+}
+
+// Overview donut in the reference design: friendly type names, top 4 + Others,
+// centre shows the real threat share (detections ÷ requests).
+function ThreatDonut({ byType, totalRequests, totalDetections }) {
+  const colors = { "SQL Injection": "#e5484d", XSS: "#f5a524", "Command Injection": "#2f7bff", "Path Traversal": "#8e4ec6", Probing: "#30a46c", Anomaly: "#12a594", Others: "#5b6b8c" };
+  const raw = Object.entries(byType || {}).map(([k, v]) => [TYPE_LABELS[k] || k, v]).sort((a, b) => b[1] - a[1]);
+  const entries = raw.slice(0, 4);
+  const rest = raw.slice(4).reduce((s, [, v]) => s + v, 0);
+  if (rest) entries.push(["Others", rest]);
+  const sum = Math.max(1, raw.reduce((s, [, v]) => s + v, 0));
+  const share = totalRequests ? ((totalDetections / totalRequests) * 100).toFixed(1) : "0.0";
+  let acc = 0;
+  const R = 52, C = 2 * Math.PI * R;
+  return (
+    <div className="donut-wrap">
+      <svg viewBox="0 0 140 140" className="donut">
+        {entries.map(([label, v]) => {
+          const frac = v / sum, start = acc; acc += frac;
+          return (
+            <circle key={label} cx="70" cy="70" r={R} fill="none" stroke={colors[label] || "#8892a4"}
+              strokeWidth="17" strokeDasharray={`${frac * C} ${C}`}
+              strokeDashoffset={-start * C} transform="rotate(-90 70 70)" />
+          );
+        })}
+        <text x="70" y="66" textAnchor="middle" className="donut-num">{share}%</text>
+        <text x="70" y="84" textAnchor="middle" className="donut-sub">Threats</text>
+      </svg>
+      <div className="donut-legend">
+        {entries.map(([label, v]) => (
+          <div className="legend-row" key={label}>
+            <span className="dot" style={{ background: colors[label] || "#8892a4" }} />
+            <span className="legend-label wide-label">{label}</span>
+            <span className="legend-val">{((v / sum) * 100).toFixed(1)}%</span>
+          </div>
+        ))}
+        {!entries.length && <p className="muted">No attacks recorded yet</p>}
+      </div>
+    </div>
+  );
+}
 
 const BATTERY = [
   ["SQLi UNION SELECT", "block"], ["SQLi login bypass", "block"], ["SQLi SLEEP probe", "monitor"],
@@ -115,6 +173,13 @@ function Dashboard({ onLogout }) {
   const [updatedAt, setUpdatedAt] = useState(null);
   const [chat, setChat] = useState([]);
   const [chatInput, setChatInput] = useState("");
+  const [range, setRange] = useState("1h");
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [scanUri, setScanUri] = useState("");
+  const [scan, setScan] = useState(null);
+  const [scanBusy, setScanBusy] = useState(false);
+  const [scanError, setScanError] = useState("");
+  const [acked, setAcked] = useState({});
 
   const load = useCallback(async () => {
     setData(await fetchDashboardOrDemo());
@@ -147,8 +212,12 @@ function Dashboard({ onLogout }) {
   const clf = metrics?.classifier;
   const clfBest = clf?.results?.[clf?.best_model];
   const anom = metrics?.anomaly;
-  const reqBuckets = bucketize(logs);
-  const blockBuckets = bucketize(detections.filter((d) => d.decision === "block"));
+  const RANGES = { "1h": [60, 5], "24h": [1440, 120], "7d": [10080, 840], "30d": [43200, 3600] };
+  const [rMin, rBucket] = RANGES[range];
+  const reqBuckets = bucketize(logs, rMin, rBucket);
+  const blockBuckets = bucketize(detections.filter((d) => d.decision === "block"), rMin, rBucket);
+  const reqTrend = trendPct(reqBuckets);
+  const blockTrend = trendPct(blockBuckets);
   const avgRisk = detections.length ? (detections.reduce((s, d) => s + d.risk_score, 0) / detections.length) : 0;
   const topIps = Object.entries(logs.reduce((acc, l) => { if (l.ip) acc[l.ip] = (acc[l.ip] || 0) + 1; return acc; }, {}))
     .sort((a, b) => b[1] - a[1]).slice(0, 5);
@@ -170,6 +239,17 @@ function Dashboard({ onLogout }) {
     setChat((c) => [...c, { who: "you", text: q }, { who: "ai", text: assistantAnswer(q, { stats, lastEvent, modelLine }) }]);
     setChatInput("");
   };
+
+  const runScan = async () => {
+    const uri = scanUri.trim();
+    if (!uri) return;
+    setScanBusy(true); setScanError(""); setScan(null);
+    try { setScan(await analyzeRequest(uri)); }
+    catch { setScanError("Backend unreachable — the scanner needs the live API (your local stack or the hosted backend)."); }
+    setScanBusy(false);
+  };
+  const sqliEvents = events.filter((e) => e.attack_type === "sqli");
+  const incidents = events.filter((e) => e.decision !== "allow");
 
   const decisionPill = (d) => <span className={`pill-status ${d}`}>{d}</span>;
 
@@ -195,7 +275,6 @@ function Dashboard({ onLogout }) {
             <div className="muted small">{data.demo ? "Backend unreachable" : "All layers active"}</div>
           </div>
         </div>
-        <button className="logout-btn" onClick={onLogout}>⎋ Logout · admin</button>
         <p className="tagline">Detect. Analyze. Prevent. Protect.</p>
       </aside>
 
@@ -208,50 +287,71 @@ function Dashboard({ onLogout }) {
           <span className={`pill ${data.demo ? "pill-demo" : "pill-live"}`}>{data.demo ? "DEMO DATA" : "● LIVE"}</span>
           <button className="ghost" onClick={load}>↻ Refresh</button>
           <span className="muted small">{updatedAt ? `Updated ${updatedAt.toLocaleTimeString()}` : ""}</span>
-          <div className="avatar">A</div>
+          <button className="bell" onClick={() => setView("live")} title="Blocked attacks — view live monitoring">
+            🔔{(stats.by_decision.block || 0) > 0 && <span className="bell-badge">{stats.by_decision.block}</span>}
+          </button>
+          <div className="admin-wrap">
+            <button className="admin-chip" onClick={() => setMenuOpen((o) => !o)}>
+              <span className="avatar">A</span> Admin <span className="muted">▾</span>
+            </button>
+            {menuOpen && (
+              <div className="admin-menu">
+                <div className="muted small">Signed in as</div>
+                <div className="admin-mail">admin@shieldnet.io</div>
+                <button className="logout-btn wide" onClick={onLogout}>⎋ Logout</button>
+              </div>
+            )}
+          </div>
         </div>
 
         {view === "overview" && (
           <>
             <section className="banner">
-              <div>
-                <h1>Welcome to ShieldNet</h1>
-                <p>Your website is protected and secure.</p>
-                <span className="chip-ok">● {data.demo ? "Demo Mode — connect the backend for live protection" : "All Systems Normal"}</span>
+              <div className="banner-left">
+                <div className="banner-shield">🛡️</div>
+                <div>
+                  <h1>Welcome to ShieldNet</h1>
+                  <p>Your website is protected and secure.</p>
+                  <span className="chip-ok">● {data.demo ? "Demo Mode — connect the backend for live protection" : "All Systems Normal"}</span>
+                </div>
               </div>
+              <div className="globe" aria-hidden="true" />
               <div className="banner-badge">
                 🛡️ {data.demo ? "Demo Data Mode" : "Real-Time Protection Active"}
-                <span>API: {API_BASE}</span>
+                <span>{updatedAt ? `Last Updated: ${updatedAt.toLocaleDateString()} · ${updatedAt.toLocaleTimeString()}` : `API: ${API_BASE}`}</span>
               </div>
             </section>
 
             <section className="cards">
-              <div className="card"><div className="card-head"><span className="card-ico">🌐</span><div><div className="card-num">{stats.total_requests.toLocaleString()}</div><div className="card-label">Total Requests</div></div></div><Sparkline values={reqBuckets} color="#2f7bff" /></div>
-              <div className="card"><div className="card-head"><span className="card-ico red">⚠️</span><div><div className="card-num">{stats.by_decision.block || 0}</div><div className="card-label">Blocked Attacks</div></div></div><Sparkline values={blockBuckets} color="#e5484d" /></div>
-              <div className="card"><div className="card-head"><span className="card-ico green">✅</span><div><div className="card-num">{clfBest ? `${(clfBest.f1 * 100).toFixed(1)}%` : "—"}</div><div className="card-label">Model F1 Score *</div></div></div><Sparkline values={reqBuckets.map((v, i) => Math.max(0, v - (i % 3)))} color="#30a46c" /></div>
-              <div className="card"><div className="card-head"><span className="card-ico purple">⚡</span><div><div className="card-num">{avgRisk.toFixed(1)}</div><div className="card-label">Avg. Risk (recent)</div></div></div><Sparkline values={detections.slice(0, 12).map((d) => d.risk_score).reverse()} color="#8e4ec6" /></div>
+              <div className="card"><div className="card-head"><span className="card-ico">🌐</span><div><div className="card-num">{stats.total_requests.toLocaleString()}</div><div className="card-label">Total Requests</div></div>{reqTrend && <span className={`trend ${reqTrend.up ? "up" : "down"}`}>{reqTrend.up ? "↑" : "↓"} {reqTrend.pct}%</span>}</div><Sparkline values={reqBuckets} color="#2f7bff" /></div>
+              <div className="card"><div className="card-head"><span className="card-ico red">⚠️</span><div><div className="card-num">{stats.by_decision.block || 0}</div><div className="card-label">Blocked Attacks</div></div>{blockTrend && <span className={`trend ${blockTrend.up ? "up" : "down"}`}>{blockTrend.up ? "↑" : "↓"} {blockTrend.pct}%</span>}</div><Sparkline values={blockBuckets} color="#e5484d" /></div>
+              <div className="card"><div className="card-head"><span className="card-ico green">✅</span><div><div className="card-num">{clfBest ? `${(clfBest.f1 * 100).toFixed(1)}%` : "—"}</div><div className="card-label">Model F1 Score *</div></div><span className="trend neutral">synthetic split</span></div><Sparkline values={reqBuckets.map((v, i) => Math.max(0, v - (i % 3)))} color="#30a46c" /></div>
+              <div className="card"><div className="card-head"><span className="card-ico purple">⚡</span><div><div className="card-num">{avgRisk.toFixed(1)}</div><div className="card-label">Avg. Risk (recent)</div></div><span className="trend neutral">{detections.length} detections</span></div><Sparkline values={detections.slice(0, 12).map((d) => d.risk_score).reverse()} color="#8e4ec6" /></div>
             </section>
             <p className="muted small footnote">* F1 on the held-out synthetic dataset — a pipeline check, not real-world accuracy. See Threat Detection.</p>
 
             <section className="grid-2">
               <div className="panel">
-                <div className="panel-head"><h2>📈 Threat Analytics</h2><span className="legend"><i className="dot" style={{ background: "#2f7bff" }} /> Requests <i className="dot" style={{ background: "#e5484d" }} /> Blocked</span></div>
+                <div className="panel-head"><h2>📈 Threat Analytics</h2>
+                  <span className="range-chips">{Object.keys(RANGES).map((r) => <button key={r} className={range === r ? "chip active" : "chip"} onClick={() => setRange(r)}>{r}</button>)}</span>
+                  <span className="legend"><i className="dot" style={{ background: "#2f7bff" }} /> Requests <i className="dot" style={{ background: "#e5484d" }} /> Blocked</span></div>
                 <AreaChart seriesA={reqBuckets} seriesB={blockBuckets} />
-                <p className="muted small">Requests per 5 minutes, last 30 minutes (from the live log feed).</p>
+                <p className="muted small">Traffic over the last {range} from the live log feed — wider windows fill in as more history is logged.</p>
               </div>
               <div className="panel">
                 <div className="panel-head"><h2>🎯 Attack Distribution</h2></div>
-                <Donut data={stats.by_attack_type} />
+                <ThreatDonut byType={stats.by_attack_type} totalRequests={stats.total_requests} totalDetections={stats.total_detections} />
               </div>
             </section>
 
             <section className="grid-3">
               <div className="panel">
-                <div className="panel-head"><h2>🌍 Traffic Sources</h2></div>
+                <div className="panel-head"><h2>🌍 Global Attack Map</h2></div>
+                <div className="map-globe" aria-hidden="true" />
                 {topIps.length ? topIps.map(([ip, n]) => (
                   <div className="src-row" key={ip}><span>{ip}</span><span className="muted">{n} requests</span></div>
                 )) : <p className="muted">No source data yet</p>}
-                <p className="muted small">Source IPs from the request log — no geolocation is tracked.</p>
+                <p className="muted small">Origins are tracked by source IP — geolocation lookup isn't enabled in this build, so this panel lists the top sources instead of plotting locations.</p>
               </div>
               <div className="panel wide">
                 <div className="panel-head"><h2>🕑 Recent Security Events</h2><button className="link" onClick={() => setView("live")}>View All →</button></div>
@@ -360,6 +460,133 @@ function Dashboard({ onLogout }) {
                     <tbody>{rows.map(([r, n]) => <tr key={r}><td>{r}</td><td>{n}</td></tr>)}</tbody></table>
                 ) : <p className="muted">No CRS rule hits in the current log window.</p>;
               })()}
+            </div>
+          </section>
+        )}
+
+        {view === "scanner" && (
+          <section className="panel">
+            <div className="panel-head"><h2>🔍 Website Scanner — test a request against the detection engine</h2></div>
+            <p className="muted">Paste any URL or path (with query string). It is scored live by the same hybrid engine — rules + ML + anomaly — that guards the demo shop.</p>
+            <div className="scan-box">
+              <input value={scanUri} onChange={(e) => setScanUri(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && runScan()}
+                placeholder="/search?q=' UNION SELECT username, password FROM users --" />
+              <button className="login-btn scan-btn" onClick={runScan} disabled={scanBusy}>{scanBusy ? "Scanning…" : "Scan"}</button>
+            </div>
+            <div className="scan-samples">
+              {["/product?id=2", "/search?q=' UNION SELECT username, password FROM users --", "/comment?text=<script>alert(1)</script>", "/static/../../.env"].map((s) => (
+                <button key={s} className="chip" onClick={() => setScanUri(s)}>{s.length > 44 ? s.slice(0, 44) + "…" : s}</button>
+              ))}
+            </div>
+            {scanError && <p className="login-error">{scanError}</p>}
+            {scan && (
+              <div className="scan-result">
+                <div className="scan-risk">
+                  <div className="card-num">{Math.round(scan.risk_score)}</div>
+                  <div className="card-label">Risk score</div>
+                  {decisionPill(scan.decision)}
+                </div>
+                <table className="kv"><tbody>
+                  <tr><td>Attack type</td><td>{scan.attack_type ? (TYPE_LABELS[scan.attack_type] || scan.attack_type) : "—"}</td></tr>
+                  <tr><td>Rule score</td><td>{scan.rule_score}</td></tr>
+                  <tr><td>ML score</td><td>{scan.ml_score ?? "— (model not loaded on this backend)"}</td></tr>
+                  <tr><td>Anomaly score</td><td>{scan.anomaly_score ?? "—"}</td></tr>
+                  <tr><td>Model version</td><td>{scan.model_version || "rules-only"}</td></tr>
+                </tbody></table>
+              </div>
+            )}
+          </section>
+        )}
+
+        {view === "api" && (
+          <section className="grid-2">
+            <div className="panel">
+              <div className="panel-head"><h2>🔌 API Security — requests by method</h2></div>
+              <table className="kv"><tbody>
+                {Object.entries(logs.reduce((a, l) => { a[l.method] = (a[l.method] || 0) + 1; return a; }, {}))
+                  .sort((x, y) => y[1] - x[1])
+                  .map(([m, n]) => <tr key={m}><td>{m}</td><td>{n} requests in feed</td></tr>)}
+              </tbody></table>
+              <p className="muted small">Counts cover the current log feed window ({logs.length} requests). Every request passes the same CRS + hybrid scoring as web traffic.</p>
+            </div>
+            <div className="panel">
+              <div className="panel-head"><h2>Top endpoints</h2></div>
+              {(() => {
+                const eps = {};
+                logs.forEach((l) => { const p = (l.uri || "").split("?")[0]; eps[p] = eps[p] || { n: 0, det: 0 }; eps[p].n += 1; });
+                detections.forEach((d) => { const l = logsById[d.request_id]; if (l) { const p = (l.uri || "").split("?")[0]; if (eps[p]) eps[p].det += 1; } });
+                const rows = Object.entries(eps).sort((a, b) => b[1].n - a[1].n).slice(0, 8);
+                return rows.length ? (
+                  <table className="feed"><thead><tr><th>Endpoint</th><th>Requests</th><th>Detections</th></tr></thead>
+                    <tbody>{rows.map(([p, v]) => <tr key={p}><td className="uri">{p}</td><td>{v.n}</td><td>{v.det}</td></tr>)}</tbody></table>
+                ) : <p className="muted">No requests yet.</p>;
+              })()}
+            </div>
+          </section>
+        )}
+
+        {view === "db" && (
+          <section className="grid-2">
+            <div className="panel">
+              <div className="panel-head"><h2>🗄️ Database Guard — SQL injection</h2></div>
+              <table className="kv"><tbody>
+                <tr><td>SQLi detections</td><td>{sqliEvents.length}</td></tr>
+                <tr><td>Blocked</td><td>{sqliEvents.filter((e) => e.decision === "block").length}</td></tr>
+                <tr><td>Monitored</td><td>{sqliEvents.filter((e) => e.decision === "monitor").length}</td></tr>
+              </tbody></table>
+              <p className="muted small">Shielded by the ModSecurity CRS 942xxx SQLi rule family at the WAF, plus the ML classifier and hybrid engine in the backend. Payloads are scored — ShieldNet never executes them against a real database.</p>
+            </div>
+            <div className="panel">
+              <div className="panel-head"><h2>Recent SQLi events</h2></div>
+              {sqliEvents.length ? (
+                <table className="feed"><thead><tr><th>Time</th><th>Source</th><th>Request</th><th>Risk</th><th>Status</th></tr></thead>
+                  <tbody>{sqliEvents.slice(0, 8).map((e) => <tr key={e.id}><td>{new Date(e.created_at).toLocaleTimeString()}</td><td>{e.ip}</td><td className="uri">{e.uri}</td><td>{e.risk_score}</td><td>{decisionPill(e.decision)}</td></tr>)}</tbody></table>
+              ) : <p className="muted">No SQL injection attempts recorded yet.</p>}
+            </div>
+          </section>
+        )}
+
+        {view === "assistant" && (
+          <section className="panel assistant">
+            <div className="panel-head"><h2>🤖 AI Security Assistant</h2><span className="status-ok small">● Online</span></div>
+            <p className="ai-intro">Your security looks {stats.by_decision.block ? "active" : "calm"} 🎉 Here's a quick summary:</p>
+            <ul className="ai-summary">{summary.map((s) => <li key={s}>{s}</li>)}</ul>
+            <div className="chat-log">
+              {chat.map((m, i) => <div key={i} className={`chat ${m.who}`}>{m.text}</div>)}
+            </div>
+            <div className="chat-box">
+              <input placeholder="Ask anything about your security..." value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && ask()} />
+              <button onClick={ask}>➤</button>
+            </div>
+            <p className="muted small">Answers are computed locally from the live stats above — no data leaves your browser.</p>
+          </section>
+        )}
+
+        {view === "incidents" && (
+          <section className="grid-2">
+            <div className="panel">
+              <div className="panel-head"><h2>🚨 Incident Response</h2></div>
+              {incidents.length ? (
+                <table className="feed"><thead><tr><th>Time</th><th>Type</th><th>Source</th><th>Risk</th><th>Decision</th><th>Status</th><th></th></tr></thead>
+                  <tbody>{incidents.map((e) => (
+                    <tr key={e.id}><td>{new Date(e.created_at).toLocaleTimeString()}</td><td>{e.attack_type || "—"}</td><td>{e.ip}</td>
+                      <td>{e.risk_score}</td><td>{decisionPill(e.decision)}</td>
+                      <td>{acked[e.id] ? <span className="pill-status monitor">acknowledged</span> : <span className="pill-status block">open</span>}</td>
+                      <td>{!acked[e.id] && <button className="link" onClick={() => setAcked((a) => ({ ...a, [e.id]: true }))}>Acknowledge</button>}</td></tr>
+                  ))}</tbody></table>
+              ) : <p className="muted">No incidents — nothing has been blocked or flagged yet.</p>}
+              <p className="muted small">Acknowledgements are kept in this browser session only.</p>
+            </div>
+            <div className="panel">
+              <div className="panel-head"><h2>Response playbook</h2></div>
+              <ol className="playbook">
+                <li><strong>Verify</strong> — open the event in Live Monitoring; check the payload and source IP.</li>
+                <li><strong>Contain</strong> — blocked decisions are already enforced by the WAF; for monitored events, watch for repeats from the same source.</li>
+                <li><strong>Tune</strong> — repeated false positives? Note the CRS rule ID in Attack Intelligence and review it before touching thresholds.</li>
+                <li><strong>Record</strong> — export a report from Reports, then acknowledge the incident here.</li>
+              </ol>
             </div>
           </section>
         )}

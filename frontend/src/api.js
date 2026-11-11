@@ -55,6 +55,18 @@ export const DEMO_DATA = {
   },
 };
 
+// Score one request against the live detection engine (POST /analyze).
+// Used by the Website Scanner view; throws when the backend is unreachable.
+export async function analyzeRequest(uri) {
+  const resp = await fetch(`${API_BASE}/analyze`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ method: "GET", uri }),
+  });
+  if (!resp.ok) throw new Error(`/analyze -> ${resp.status}`);
+  return resp.json();
+}
+
 export async function fetchDashboardOrDemo() {
   try {
     return await fetchDashboard();
