@@ -26,6 +26,13 @@ def test_strong_rule_hit_floors_risk():
     assert hybrid.decide(risk) == "block"
 
 
+def test_strong_ml_floors_at_monitor():
+    # SLEEP()-style probe: rules miss it, ML is near-certain.
+    risk = hybrid.combine(0.0, 93.5, 16.0)
+    assert risk >= 55.0
+    assert hybrid.decide(risk) == "monitor"
+
+
 def test_decide_thresholds():
     assert hybrid.decide(10) == "allow"
     assert hybrid.decide(50) == "monitor"

@@ -79,7 +79,7 @@ The dashboard is added in Phase 5 — see
 - **Phase 3** — ML detection: feature extraction + XGBoost / Random Forest training ✅
 - **Phase 4** — Anomaly detection + hybrid scoring engine ✅
 - **Phase 5** — React dashboard on Vercel ✅ (built; Vercel link pending team access)
-- **Phase 6** — End-to-end attack tests (SQLi, XSS, path traversal), demo + docs
+- **Phase 6** — End-to-end attack tests (SQLi, XSS, path traversal), demo + docs ✅ — see [docs/DEMO.md](docs/DEMO.md)
 
 ## Status
 

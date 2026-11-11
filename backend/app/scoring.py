@@ -14,12 +14,14 @@ PATTERNS: list[tuple[str, str, int]] = [
     # (regex, attack_type, weight)
     (r"(\bunion\b\s+\bselect\b|\bselect\b.+\bfrom\b|'\s*or\s+'?1'?\s*=\s*'?1)", "sqli", 45),
     (r"(--|#|/\*|\bdrop\b\s+\btable\b|\binsert\b\s+\binto\b|\bupdate\b.+\bset\b)", "sqli", 30),
+    (r"(\b(sleep|benchmark)\s*\()", "sqli", 30),
     (r"(<script|javascript:|onerror\s*=|onload\s*=|<img[^>]+on\w+\s*=)", "xss", 45),
     (r"(<svg|<iframe|document\.cookie|alert\s*\()", "xss", 30),
-    (r"(\.\./|\.\.\\|%2e%2e%2f|/etc/passwd|boot\.ini)", "traversal", 40),
+    (r"(\.\./|\.\.\\|%2e%2e%2f)", "traversal", 25),
+    (r"(/etc/passwd|boot\.ini)", "traversal", 30),
     (r"(\.\.;|%c0%ae)", "traversal", 25),
-    (r"(;|\||&&|`|\$\()\s*(cat|ls|id|whoami|wget|curl|bash|sh)\b", "rce", 45),
-    (r"(\b(admin|wp-admin|phpmyadmin|\.env|\.git/))", "probing", 15),
+    (r"(;|\||&&|`|\$\()\s*(cat|ls|id|whoami|wget|curl|bash|sh)\b", "rce", 55),
+    (r"(admin|wp-admin|phpmyadmin|\.env|\.git/)", "probing", 15),
 ]
 
 

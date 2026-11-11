@@ -61,8 +61,9 @@ def analyze(payload: schemas.RequestIn, db: Session = Depends(get_db)):
     ml = ml_scoring.score(payload.method, payload.uri, payload.body, payload.headers)
     anomaly = anomaly_scoring.score(payload.method, payload.uri, payload.body, payload.headers)
     risk = hybrid.combine(result.rule_score, ml, anomaly)
+    decision = hybrid.decide(risk)
     attack_type = result.attack_type
-    if attack_type is None and anomaly is not None and anomaly >= 75:
+    if attack_type is None and decision != "allow" and anomaly is not None and anomaly >= 75:
         attack_type = "anomaly"
     detection = models.Detection(
         request_id=log.id,
@@ -70,7 +71,7 @@ def analyze(payload: schemas.RequestIn, db: Session = Depends(get_db)):
         ml_score=ml,
         anomaly_score=anomaly,
         risk_score=risk,
-        decision=hybrid.decide(risk),
+        decision=decision,
         attack_type=attack_type,
         model_version=ml_scoring.model_version(),
     )
