@@ -2,10 +2,16 @@ from pydantic_settings import BaseSettings
 
 
 def normalize_database_url(url: str) -> str:
-    """Hosted Postgres providers often hand out postgres:// URLs, but
-    SQLAlchemy 2 requires the postgresql:// scheme."""
-    if url.startswith("postgres://"):
-        return "postgresql://" + url[len("postgres://"):]
+    """Make hosted Postgres URLs work with the installed driver.
+
+    Providers hand out postgres:// or postgresql:// URLs. Bare schemes let
+    SQLAlchemy pick its default DBAPI — which changed to psycopg (v3) in
+    newer SQLAlchemy, while this project installs psycopg2-binary. Pin the
+    driver explicitly: postgresql+psycopg2://.
+    """
+    for prefix in ("postgres://", "postgresql://"):
+        if url.startswith(prefix):
+            return "postgresql+psycopg2://" + url[len(prefix):]
     return url
 
 
