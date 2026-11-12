@@ -88,6 +88,54 @@ def test_login_rate_limit_kicks_in_after_repeated_failures():
     assert client.post("/auth/login", json=victim).status_code == 429
 
 
+def _fresh_email() -> str:
+    return f"user-{os.urandom(4).hex()}@example.com"
+
+
+def test_register_creates_account_and_signs_in():
+    client = TestClient(app)
+    email = _fresh_email()
+    r = client.post("/auth/register", json={"name": "Test User", "email": email, "password": "strong-pass-1"})
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["email"] == email
+    assert body["name"] == "Test User"
+    assert body["access_token"]
+    headers = {"Authorization": f"Bearer {body['access_token']}"}
+    me = client.get("/auth/me", headers=headers)
+    assert me.status_code == 200
+    assert me.json() == {"email": email, "name": "Test User"}
+
+
+def test_register_duplicate_email_is_409():
+    client = TestClient(app)
+    email = _fresh_email()
+    payload = {"email": email, "password": "strong-pass-1"}
+    assert client.post("/auth/register", json=payload).status_code == 201
+    r = client.post("/auth/register", json=payload)
+    assert r.status_code == 409
+    assert "already exists" in r.json()["detail"]
+
+
+def test_register_rejects_short_password_and_bad_email():
+    client = TestClient(app)
+    r = client.post("/auth/register", json={"email": _fresh_email(), "password": "short"})
+    assert r.status_code == 400
+    r = client.post("/auth/register", json={"email": "not-an-email", "password": "strong-pass-1"})
+    assert r.status_code == 400
+
+
+def test_registered_user_can_log_in_afterwards():
+    client = TestClient(app)
+    email = _fresh_email()
+    creds = {"email": email, "password": "strong-pass-1"}
+    assert client.post("/auth/register", json=creds).status_code == 201
+    fresh = TestClient(app)
+    r = fresh.post("/auth/login", json=creds)
+    assert r.status_code == 200, r.text
+    assert r.json()["email"] == email
+
+
 def test_analyze_and_ingest_open_when_no_api_key_configured():
     # Local-dev default (INGEST_API_KEY unset): machine endpoints accept
     # unauthenticated calls; production sets the key (see docs/HOSTING.md).

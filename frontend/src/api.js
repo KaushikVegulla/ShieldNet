@@ -12,9 +12,19 @@ export const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8
    silent refresh, then retry the original request. */
 
 let accessToken = null;
+let sessionUser = null; // { email, name } of the signed-in user
 
 export function hasAccessToken() {
   return Boolean(accessToken);
+}
+
+export function getSessionUser() {
+  return sessionUser;
+}
+
+function acceptToken(body) {
+  accessToken = body.access_token;
+  sessionUser = { email: body.email, name: body.name || null };
 }
 
 function authHeaders() {
@@ -35,33 +45,43 @@ async function postAuth(path, body) {
 export async function refreshSession() {
   try {
     const resp = await postAuth("/auth/refresh");
-    if (!resp.ok) { accessToken = null; return false; }
-    accessToken = (await resp.json()).access_token;
+    if (!resp.ok) { accessToken = null; sessionUser = null; return false; }
+    acceptToken(await resp.json());
     return true;
   } catch {
     accessToken = null;
+    sessionUser = null;
     return false;
   }
 }
 
-// Throws an Error with .status for HTTP failures; network failures have no
-// .status, which the login page uses to offer the offline demo mode.
-export async function apiLogin(email, password) {
-  const resp = await postAuth("/auth/login", { email, password });
+// Throws an Error with .status and .detail for HTTP failures; network
+// failures have no .status.
+async function authCall(path, payload) {
+  const resp = await postAuth(path, payload);
   if (!resp.ok) {
-    const err = new Error(`login -> ${resp.status}`);
+    const err = new Error(`${path} -> ${resp.status}`);
     err.status = resp.status;
     try { err.detail = (await resp.json()).detail; } catch { /* keep status only */ }
     throw err;
   }
   const body = await resp.json();
-  accessToken = body.access_token;
+  acceptToken(body);
   return body;
+}
+
+export async function apiLogin(email, password) {
+  return authCall("/auth/login", { email, password });
+}
+
+export async function apiRegister(name, email, password) {
+  return authCall("/auth/register", { name, email, password });
 }
 
 export async function apiLogout() {
   try { await postAuth("/auth/logout"); } catch { /* session is dropped locally either way */ }
   accessToken = null;
+  sessionUser = null;
 }
 
 async function get(path, retried = false) {

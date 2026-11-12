@@ -9,10 +9,17 @@ class LoginIn(BaseModel):
     password: str
 
 
+class RegisterIn(BaseModel):
+    name: str | None = None
+    email: str
+    password: str
+
+
 class TokenOut(BaseModel):
     access_token: str
     token_type: str = "bearer"
     email: str
+    name: str | None = None
 
 
 class RequestIn(BaseModel):

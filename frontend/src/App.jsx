@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { API_BASE, analyzeRequest, apiLogin, apiLogout, fetchDashboardOrDemo, refreshSession } from "./api.js";
+import { API_BASE, analyzeRequest, apiLogin, apiLogout, apiRegister, fetchDashboardOrDemo, getSessionUser, refreshSession } from "./api.js";
 
 /* ---------- small chart helpers (no chart library, pure SVG) ---------- */
 
@@ -292,12 +292,12 @@ function Dashboard({ onLogout }) {
           </button>
           <div className="admin-wrap">
             <button className="admin-chip" onClick={() => setMenuOpen((o) => !o)}>
-              <span className="avatar">A</span> Admin <span className="muted">▾</span>
+              <span className="avatar">{(getSessionUser()?.name || getSessionUser()?.email || "U").charAt(0).toUpperCase()}</span> {getSessionUser()?.name || "Account"} <span className="muted">▾</span>
             </button>
             {menuOpen && (
               <div className="admin-menu">
                 <div className="muted small">Signed in as</div>
-                <div className="admin-mail">admin@shieldnet.io</div>
+                <div className="admin-mail">{getSessionUser()?.email || ""}</div>
                 <button className="logout-btn wide" onClick={onLogout}>⎋ Logout</button>
               </div>
             )}
@@ -628,41 +628,47 @@ function Dashboard({ onLogout }) {
   );
 }
 
-/* ---------- Login ----------
-   Real backend auth: POST /auth/login verifies the password (Argon2id hash)
-   and issues a JWT access token + httpOnly refresh cookie; the API itself
-   rejects unauthenticated calls. The demo account below is a seeded user in
-   the backend database. If the backend is unreachable, the same credentials
-   enter the offline demo-data mode so the console can still be explored. */
-const DEMO_ACCOUNT = { email: "admin@shieldnet.io", password: "shieldnet" };
-
-function Login({ onLogin, onDemoLogin }) {
+/* ---------- Auth (sign in / create account) ----------
+   Verified by the backend: passwords are Argon2id-hashed server-side,
+   sessions are a JWT access token + rotating httpOnly refresh cookie, and
+   the API rejects unauthenticated calls. No demo credentials anywhere —
+   anyone can create their own account. */
+function Auth({ onAuthed }) {
+  const [mode, setMode] = useState("signin"); // "signin" | "signup"
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
   const [error, setError] = useState("");
+  const [showForgot, setShowForgot] = useState(false);
   const [busy, setBusy] = useState(false);
+
+  const switchMode = (m) => { setMode(m); setError(""); setShowForgot(false); };
 
   const submit = async (e) => {
     e.preventDefault();
-    setBusy(true);
     setError("");
+    const cleanEmail = email.trim().toLowerCase();
+    if (mode === "signup") {
+      if (password.length < 8) { setError("Password must be at least 8 characters."); return; }
+      if (password !== confirm) { setError("Passwords don't match — check the confirmation field."); return; }
+    }
+    setBusy(true);
     try {
-      await apiLogin(email.trim().toLowerCase(), password);
-      onLogin();
+      if (mode === "signup") await apiRegister(name.trim(), cleanEmail, password);
+      else await apiLogin(cleanEmail, password);
+      onAuthed();
     } catch (err) {
-      if (err.status === 401) {
-        setError("Invalid email or password — use the demo credentials below.");
-      } else if (err.status === 429) {
-        setError("Too many failed attempts — wait a few minutes and try again.");
-      } else if (email.trim().toLowerCase() === DEMO_ACCOUNT.email && password === DEMO_ACCOUNT.password) {
-        onDemoLogin(); // backend unreachable: offline demo-data mode
-      } else {
-        setError("Backend unreachable — check your connection, or use the demo credentials for offline demo mode.");
-      }
+      if (err.status === 401) setError("Invalid email or password.");
+      else if (err.status === 409) setError("An account with this email already exists — try signing in instead.");
+      else if (err.status === 429) setError("Too many attempts — wait a few minutes and try again.");
+      else if (err.status === 400 && err.detail) setError(err.detail);
+      else setError("Can't reach the ShieldNet backend right now — it may be waking up; try again in a few seconds.");
     }
     setBusy(false);
   };
 
+  const signingUp = mode === "signup";
   return (
     <div className="login-wrap">
       <form className="login-card" onSubmit={submit}>
@@ -670,22 +676,61 @@ function Login({ onLogin, onDemoLogin }) {
           <div className="brand-icon">🛡️</div>
           <div><strong>ShieldNet</strong><span>AI-Powered WAF</span></div>
         </div>
-        <h1>Sign in to the console</h1>
-        <p className="muted">Monitor threats, detections and WAF activity in real time.</p>
+
+        <div className="auth-toggle" role="tablist">
+          <button type="button" className={signingUp ? "" : "active"} onClick={() => switchMode("signin")}>Sign in</button>
+          <button type="button" className={signingUp ? "active" : ""} onClick={() => switchMode("signup")}>Create account</button>
+        </div>
+
+        <h1>{signingUp ? "Create your account" : "Welcome back"}</h1>
+        <p className="muted">{signingUp
+          ? "Set up your console login — it takes ten seconds."
+          : "Pick up right where your firewall left off."}</p>
+
+        {signingUp && (
+          <label className="login-label">Name
+            <input type="text" value={name} onChange={(e) => setName(e.target.value)}
+              placeholder="Your name" autoComplete="name" />
+          </label>
+        )}
         <label className="login-label">Email
           <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
-            placeholder="admin@shieldnet.io" autoFocus required />
+            placeholder="you@example.com" autoComplete="email" autoFocus required />
         </label>
         <label className="login-label">Password
           <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
-            placeholder="••••••••" required />
+            placeholder="••••••••" autoComplete={signingUp ? "new-password" : "current-password"} required />
+          {signingUp && <span className="field-hint">8+ characters. Stored only as an Argon2id hash.</span>}
         </label>
+        {signingUp && (
+          <label className="login-label">Confirm password
+            <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)}
+              placeholder="••••••••" autoComplete="new-password" required />
+          </label>
+        )}
+
+        {!signingUp && (
+          <div className="forgot-row">
+            <button type="button" className="link" onClick={() => setShowForgot((s) => !s)}>Forgot password?</button>
+          </div>
+        )}
+        {showForgot && !signingUp && (
+          <p className="auth-note">Self-service reset isn't enabled on this deployment yet. If you're the owner, the admin password is managed through the backend's <code>ADMIN_PASSWORD</code> setting — update it and restart the service.</p>
+        )}
+
         {error && <p className="login-error">{error}</p>}
-        <button className="login-btn" type="submit" disabled={busy}>{busy ? "Signing in…" : "Sign In →"}</button>
-        <div className="login-hint">
-          Demo account — email <code>admin@shieldnet.io</code> · password <code>shieldnet</code>
-        </div>
-        <p className="muted small">Sign-in is verified by the ShieldNet backend — passwords are Argon2id-hashed and the API requires a JWT. If the backend is offline, the demo account opens the console in demo-data mode.</p>
+        <button className="login-btn" type="submit" disabled={busy}>
+          {busy ? "One moment…" : signingUp ? "Create account & enter →" : "Sign in to ShieldNet →"}
+        </button>
+
+        <p className="auth-foot">
+          {signingUp ? (
+            <>Already have an account? <button type="button" className="link" onClick={() => switchMode("signin")}>Sign in</button></>
+          ) : (
+            <>New to ShieldNet? <button type="button" className="link" onClick={() => switchMode("signup")}>Create an account</button></>
+          )}
+        </p>
+        <p className="muted small">Guarded by ShieldNet itself — Argon2id password hashing · JWT sessions · login rate limiting.</p>
       </form>
     </div>
   );
@@ -694,28 +739,21 @@ function Login({ onLogin, onDemoLogin }) {
 export default function App() {
   // "checking" while we try to restore the session from the refresh cookie.
   const [authState, setAuthState] = useState("checking");
-  const [demoSession, setDemoSession] = useState(false);
 
   useEffect(() => {
     refreshSession().then((ok) => setAuthState(ok ? "in" : "out"));
   }, []);
 
-  if (authState === "checking" && !demoSession) {
+  if (authState === "checking") {
     return <div className="boot">Loading ShieldNet console…</div>;
   }
-  if (authState !== "in" && !demoSession) {
-    return (
-      <Login
-        onLogin={() => setAuthState("in")}
-        onDemoLogin={() => setDemoSession(true)}
-      />
-    );
+  if (authState !== "in") {
+    return <Auth onAuthed={() => setAuthState("in")} />;
   }
   return (
     <Dashboard
       onLogout={async () => {
         await apiLogout();
-        setDemoSession(false);
         setAuthState("out");
       }}
     />

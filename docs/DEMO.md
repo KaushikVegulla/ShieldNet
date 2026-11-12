@@ -12,11 +12,12 @@ docker compose up -d --build
 - Target app via WAF: http://localhost:8080
 - Backend API: http://localhost:8000 (`/docs` for Swagger)
 - Dashboard: `cd frontend && npm run dev` → http://localhost:5173
-  (or the Vercel deployment). The console opens on a **login page** —
-  demo account: `admin@shieldnet.io` / `shieldnet`. The login is real
-  backend auth (Argon2id password hash + JWT access token + rotating
-  httpOnly refresh cookie); the demo account is a user seeded in the
-  database on first startup. Logout is in the Admin menu (top right).
+  (or the Vercel deployment). The console opens on an **auth page** with
+  Sign in / Create account — evaluators can register their own account
+  (real backend auth: Argon2id password hash + JWT access token +
+  rotating httpOnly refresh cookie). The owner's seeded account is
+  `admin@shieldnet.io` / `shieldnet` (configurable via ADMIN_EMAIL /
+  ADMIN_PASSWORD). Logout is in the user menu (top right).
 
 ## 2. Demo script (5 minutes)
 
@@ -66,11 +67,13 @@ engine and re-verified.
 - **The anomaly model over-flags** (32% of benign synthetic traffic scores
   > 40; a benign login scored 81). That's why its hybrid weight is only
   0.15 and why it can't block on its own.
-- **The demo account is public by design** — `admin@shieldnet.io` /
-  `shieldnet` is printed on the login page for evaluators. The auth
-  mechanism is production-shaped (Argon2id + JWT + rotating refresh
-  tokens + login rate limiting), but for a real deployment you would
-  change `ADMIN_PASSWORD`, disable the demo account, and add 2FA.
+- **Registration is open** — anyone who can reach the hosted backend can
+  create a console account (that's deliberate for evaluation; a real
+  deployment would close sign-ups or gate them behind invites, change
+  `ADMIN_PASSWORD`, and add 2FA). The auth mechanism itself is
+  production-shaped: Argon2id hashing, JWT access tokens, rotating
+  refresh tokens, login rate limiting. Self-service password reset is
+  not implemented yet.
 - **Machine endpoints in local dev**: with `INGEST_API_KEY` unset,
   `/ingest` and `/analyze` accept unauthenticated calls (the WAF pipeline
   and attack battery rely on this locally). Production sets the key, and

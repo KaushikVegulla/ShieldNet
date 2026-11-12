@@ -9,6 +9,7 @@ from .config import settings
 from .db import Base, SessionLocal, engine, get_db
 
 Base.metadata.create_all(bind=engine)
+auth.migrate_users_table(engine)
 
 with SessionLocal() as _seed_db:
     auth.ensure_seed_user(_seed_db)
@@ -74,7 +75,34 @@ def login(payload: schemas.LoginIn, request: Request, response: Response, db: Se
         raise HTTPException(status_code=401, detail="Invalid email or password")
     auth.clear_login_failures(email, client_ip)
     _set_refresh_cookie(response, auth.create_refresh_token(db, user))
-    return schemas.TokenOut(access_token=auth.create_access_token(user.email), email=user.email)
+    return schemas.TokenOut(access_token=auth.create_access_token(user.email), email=user.email, name=user.name)
+
+
+@app.post("/auth/register", response_model=schemas.TokenOut, status_code=201)
+def register(payload: schemas.RegisterIn, request: Request, response: Response, db: Session = Depends(get_db)):
+    """Create an account and sign the new user in immediately."""
+    email = payload.email.strip().lower()
+    client_ip = request.client.host if request.client else "unknown"
+    auth.check_login_rate_limit(email, client_ip)
+    if "@" not in email or "." not in email.split("@")[-1]:
+        auth.record_login_failure(email, client_ip)
+        raise HTTPException(status_code=400, detail="Enter a valid email address")
+    if len(payload.password) < 8:
+        auth.record_login_failure(email, client_ip)
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+    if db.query(models.User).filter(models.User.email == email).first() is not None:
+        auth.record_login_failure(email, client_ip)
+        raise HTTPException(status_code=409, detail="An account with this email already exists")
+    user = models.User(
+        email=email,
+        name=(payload.name or "").strip() or None,
+        password_hash=auth.hash_password(payload.password),
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    _set_refresh_cookie(response, auth.create_refresh_token(db, user))
+    return schemas.TokenOut(access_token=auth.create_access_token(user.email), email=user.email, name=user.name)
 
 
 @app.post("/auth/refresh", response_model=schemas.TokenOut)
@@ -83,7 +111,7 @@ def refresh(request: Request, response: Response, db: Session = Depends(get_db))
     if record is None:
         raise HTTPException(status_code=401, detail="No valid refresh session")
     _set_refresh_cookie(response, auth.rotate_refresh_token(db, record))
-    return schemas.TokenOut(access_token=auth.create_access_token(record.user.email), email=record.user.email)
+    return schemas.TokenOut(access_token=auth.create_access_token(record.user.email), email=record.user.email, name=record.user.name)
 
 
 @app.post("/auth/logout")
@@ -95,7 +123,7 @@ def logout(request: Request, response: Response, db: Session = Depends(get_db)):
 
 @app.get("/auth/me")
 def me(user: models.User = Depends(auth.get_current_user)):
-    return {"email": user.email}
+    return {"email": user.email, "name": user.name}
 
 
 @app.post("/ingest", response_model=schemas.RequestLogOut, status_code=201, dependencies=[Depends(auth.require_write_access)])

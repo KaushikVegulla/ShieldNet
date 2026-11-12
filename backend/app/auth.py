@@ -192,12 +192,27 @@ def revoke_refresh_token(db: Session, raw: str) -> None:
 # --- seed user ---
 
 def ensure_seed_user(db: Session) -> None:
-    """Create the configured admin user on first run (demo account by
-    default; override ADMIN_EMAIL / ADMIN_PASSWORD via env)."""
+    """Create the configured admin user on first run (the owner's account;
+    override ADMIN_EMAIL / ADMIN_PASSWORD via env)."""
     existing = db.query(models.User).filter(models.User.email == settings.admin_email).first()
     if existing is None:
         db.add(models.User(
             email=settings.admin_email,
+            name="Admin",
             password_hash=hash_password(settings.admin_password),
         ))
         db.commit()
+
+
+def migrate_users_table(engine) -> None:
+    """create_all() never alters existing tables, so databases created
+    before the `name` column existed get it added here (idempotent)."""
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(engine)
+    if "users" not in inspector.get_table_names():
+        return
+    columns = {c["name"] for c in inspector.get_columns("users")}
+    if "name" not in columns:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE users ADD COLUMN name VARCHAR(255)"))
