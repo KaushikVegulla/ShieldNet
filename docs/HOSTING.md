@@ -4,9 +4,19 @@ Goal: the Vercel dashboard shows **LIVE** data. That needs the backend +
 PostgreSQL on a public HTTPS host — Vercel only hosts the frontend.
 
 ```
-Browser -> Vercel (React dashboard) -> Render (FastAPI backend) -> Render PostgreSQL
+Browser -> Vercel (React dashboard) -> Render (FastAPI backend) -> Neon PostgreSQL
 Laptop   -> Docker (ModSecurity WAF + target app) --/analyze, /ingest--> Render backend (optional)
 ```
+
+**Current setup (since 12 Nov 2026):** the database lives on **Neon**
+(free tier, no expiry) — Render's free PostgreSQL expires after 30 days,
+so `DATABASE_URL` on the Render service points at the Neon project
+"shieldnet" (pooled connection string). In `render.yaml` the variable is
+`sync: false` so a blueprint sync cannot overwrite it. The blueprint
+steps below still describe the original all-Render setup; to reproduce
+it exactly you would also create a Neon project and set `DATABASE_URL`
+to its pooled connection string (with `sslmode=require`) in the Render
+service's Environment tab.
 
 ## 1. Deploy the backend on Render (free)
 
