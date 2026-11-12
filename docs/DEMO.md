@@ -13,7 +13,10 @@ docker compose up -d --build
 - Backend API: http://localhost:8000 (`/docs` for Swagger)
 - Dashboard: `cd frontend && npm run dev` → http://localhost:5173
   (or the Vercel deployment). The console opens on a **login page** —
-  demo account: `admin@shieldnet.io` / `shieldnet` (logout is in the sidebar).
+  demo account: `admin@shieldnet.io` / `shieldnet`. The login is real
+  backend auth (Argon2id password hash + JWT access token + rotating
+  httpOnly refresh cookie); the demo account is a user seeded in the
+  database on first startup. Logout is in the Admin menu (top right).
 
 ## 2. Demo script (5 minutes)
 
@@ -63,9 +66,15 @@ engine and re-verified.
 - **The anomaly model over-flags** (32% of benign synthetic traffic scores
   > 40; a benign login scored 81). That's why its hybrid weight is only
   0.15 and why it can't block on its own.
-- **The console login is a UI gate only** — one built-in demo account,
-  checked in the browser; the backend API itself has no authentication
-  yet. Production auth would be backend-issued tokens (e.g. JWT).
+- **The demo account is public by design** — `admin@shieldnet.io` /
+  `shieldnet` is printed on the login page for evaluators. The auth
+  mechanism is production-shaped (Argon2id + JWT + rotating refresh
+  tokens + login rate limiting), but for a real deployment you would
+  change `ADMIN_PASSWORD`, disable the demo account, and add 2FA.
+- **Machine endpoints in local dev**: with `INGEST_API_KEY` unset,
+  `/ingest` and `/analyze` accept unauthenticated calls (the WAF pipeline
+  and attack battery rely on this locally). Production sets the key, and
+  those endpoints then require the `X-API-Key` header or a user JWT.
 - **The WAF-level script** (`tests/run_e2e.sh`) needs the Docker stack and
   is verified manually, not in CI.
 - This is an academic demonstration, not a production WAF.

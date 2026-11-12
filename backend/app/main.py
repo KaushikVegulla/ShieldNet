@@ -1,20 +1,27 @@
 from collections import Counter
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
-from . import anomaly_scoring, hybrid, ml_scoring, models, schemas, scoring
-from .db import Base, engine, get_db
+from . import anomaly_scoring, auth, hybrid, ml_scoring, models, schemas, scoring
+from .config import settings
+from .db import Base, SessionLocal, engine, get_db
 
 Base.metadata.create_all(bind=engine)
 
+with SessionLocal() as _seed_db:
+    auth.ensure_seed_user(_seed_db)
+
 app = FastAPI(title="ShieldNet Backend", version="0.1.0")
 
-# Dashboard (Vercel / localhost) calls this API from a browser.
+# Dashboard (Vercel / localhost) calls this API from a browser. Credentialed
+# requests (refresh cookie) require explicit origins — "*" is not allowed
+# with credentials — so origins come from CORS_ORIGINS.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.cors_origin_list,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -42,13 +49,62 @@ def health():
     return {"status": "ok", "service": "shieldnet-backend"}
 
 
-@app.post("/ingest", response_model=schemas.RequestLogOut, status_code=201)
+# --- Auth: JWT access token + rotating httpOnly refresh cookie ---
+
+def _set_refresh_cookie(response: Response, raw_token: str) -> None:
+    response.set_cookie(
+        auth.REFRESH_COOKIE,
+        raw_token,
+        httponly=True,
+        secure=settings.auth_cookie_secure,
+        samesite=settings.auth_cookie_samesite,
+        max_age=settings.refresh_token_days * 86400,
+        path=auth.REFRESH_COOKIE_PATH,
+    )
+
+
+@app.post("/auth/login", response_model=schemas.TokenOut)
+def login(payload: schemas.LoginIn, request: Request, response: Response, db: Session = Depends(get_db)):
+    email = payload.email.strip().lower()
+    client_ip = request.client.host if request.client else "unknown"
+    auth.check_login_rate_limit(email, client_ip)
+    user = db.query(models.User).filter(models.User.email == email).first()
+    if user is None or not auth.verify_password(user.password_hash, payload.password):
+        auth.record_login_failure(email, client_ip)
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    auth.clear_login_failures(email, client_ip)
+    _set_refresh_cookie(response, auth.create_refresh_token(db, user))
+    return schemas.TokenOut(access_token=auth.create_access_token(user.email), email=user.email)
+
+
+@app.post("/auth/refresh", response_model=schemas.TokenOut)
+def refresh(request: Request, response: Response, db: Session = Depends(get_db)):
+    record = auth.verify_refresh_token(db, request.cookies.get(auth.REFRESH_COOKIE, ""))
+    if record is None:
+        raise HTTPException(status_code=401, detail="No valid refresh session")
+    _set_refresh_cookie(response, auth.rotate_refresh_token(db, record))
+    return schemas.TokenOut(access_token=auth.create_access_token(record.user.email), email=record.user.email)
+
+
+@app.post("/auth/logout")
+def logout(request: Request, response: Response, db: Session = Depends(get_db)):
+    auth.revoke_refresh_token(db, request.cookies.get(auth.REFRESH_COOKIE, ""))
+    response.delete_cookie(auth.REFRESH_COOKIE, path=auth.REFRESH_COOKIE_PATH)
+    return {"ok": True}
+
+
+@app.get("/auth/me")
+def me(user: models.User = Depends(auth.get_current_user)):
+    return {"email": user.email}
+
+
+@app.post("/ingest", response_model=schemas.RequestLogOut, status_code=201, dependencies=[Depends(auth.require_write_access)])
 def ingest(payload: schemas.RequestIn, db: Session = Depends(get_db)):
     """Log a request (e.g. from the ModSecurity audit pipeline). No scoring."""
     return _store_request(db, payload)
 
 
-@app.post("/analyze", response_model=schemas.AnalyzeOut)
+@app.post("/analyze", response_model=schemas.AnalyzeOut, dependencies=[Depends(auth.require_write_access)])
 def analyze(payload: schemas.RequestIn, db: Session = Depends(get_db)):
     """Log a request, score it, store a detection, return the decision.
 
@@ -91,7 +147,7 @@ def analyze(payload: schemas.RequestIn, db: Session = Depends(get_db)):
 
 
 @app.get("/logs", response_model=list[schemas.RequestLogOut])
-def list_logs(limit: int = 50, db: Session = Depends(get_db)):
+def list_logs(limit: int = 50, db: Session = Depends(get_db), _user: models.User = Depends(auth.get_current_user)):
     return (
         db.query(models.RequestLog)
         .order_by(models.RequestLog.id.desc())
@@ -101,7 +157,7 @@ def list_logs(limit: int = 50, db: Session = Depends(get_db)):
 
 
 @app.get("/detections", response_model=list[schemas.DetectionOut])
-def list_detections(limit: int = 50, db: Session = Depends(get_db)):
+def list_detections(limit: int = 50, db: Session = Depends(get_db), _user: models.User = Depends(auth.get_current_user)):
     return (
         db.query(models.Detection)
         .order_by(models.Detection.id.desc())
@@ -111,7 +167,7 @@ def list_detections(limit: int = 50, db: Session = Depends(get_db)):
 
 
 @app.get("/model-metrics")
-def model_metrics():
+def model_metrics(_user: models.User = Depends(auth.get_current_user)):
     """Training metrics for the dashboard, read from the models directory.
 
     Looks next to MODEL_PATH / ANOMALY_MODEL_PATH for metrics.json and
@@ -139,7 +195,7 @@ def model_metrics():
 
 
 @app.get("/stats", response_model=schemas.StatsOut)
-def stats(db: Session = Depends(get_db)):
+def stats(db: Session = Depends(get_db), _user: models.User = Depends(auth.get_current_user)):
     detections = db.query(models.Detection).all()
     return schemas.StatsOut(
         total_requests=db.query(models.RequestLog).count(),

@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, Column, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
 
 from .db import Base
@@ -42,3 +42,32 @@ class Detection(Base):
     model_version = Column(String(32), default="baseline-rules-v1")
 
     request = relationship("RequestLog", back_populates="detection")
+
+
+class User(Base):
+    """Console user. Only the Argon2id password hash is stored, never the
+    password itself."""
+
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String(255), unique=True, index=True, nullable=False)
+    password_hash = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+
+
+class RefreshToken(Base):
+    """A hashed refresh token. The raw token lives only in the user's
+    httpOnly cookie; storing the SHA-256 hash lets us rotate and revoke
+    sessions (logout, reuse detection) server-side."""
+
+    __tablename__ = "refresh_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
+    token_hash = Column(String(64), index=True)
+    expires_at = Column(DateTime(timezone=True))
+    revoked = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+
+    user = relationship("User")

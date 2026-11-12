@@ -4,6 +4,17 @@ from typing import Any, Optional
 from pydantic import BaseModel, Field
 
 
+class LoginIn(BaseModel):
+    email: str
+    password: str
+
+
+class TokenOut(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    email: str
+
+
 class RequestIn(BaseModel):
     """A single HTTP request to log and/or analyze."""
 

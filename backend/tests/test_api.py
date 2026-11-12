@@ -8,6 +8,12 @@ from app.main import app  # noqa: E402
 
 client = TestClient(app)
 
+# Read endpoints require a JWT since the auth change; log in once with the
+# seeded admin account and reuse the access token for the whole module.
+_login = client.post("/auth/login", json={"email": "admin@shieldnet.io", "password": "shieldnet"})
+assert _login.status_code == 200, _login.text
+client.headers.update({"Authorization": f"Bearer {_login.json()['access_token']}"})
+
 
 def test_health():
     r = client.get("/health")

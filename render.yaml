@@ -19,6 +19,20 @@ services:
         value: "40"
       - key: RISK_BLOCK_THRESHOLD
         value: "75"
+      # Auth: JWT signing secret + refresh-cookie flags for the cross-site
+      # setup (Vercel frontend -> Render backend). generateValue makes Render
+      # create a random value on first blueprint apply; for an existing
+      # service, add these in the dashboard's Environment tab instead.
+      - key: JWT_SECRET
+        generateValue: true
+      - key: INGEST_API_KEY
+        generateValue: true
+      - key: AUTH_COOKIE_SECURE
+        value: "true"
+      - key: AUTH_COOKIE_SAMESITE
+        value: "none"
+      - key: CORS_ORIGINS
+        value: "https://shieldnet-web.vercel.app,http://localhost:5173"
 
 databases:
   - name: shieldnet-db

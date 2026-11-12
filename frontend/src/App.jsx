@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { API_BASE, analyzeRequest, fetchDashboardOrDemo } from "./api.js";
+import { API_BASE, analyzeRequest, apiLogin, apiLogout, fetchDashboardOrDemo, refreshSession } from "./api.js";
 
 /* ---------- small chart helpers (no chart library, pure SVG) ---------- */
 
@@ -628,25 +628,39 @@ function Dashboard({ onLogout }) {
   );
 }
 
-/* ---------- Login gate (demo) ----------
-   Client-side gate in front of the console: one built-in demo account, the
-   session is kept in sessionStorage for the current tab. This is a UX gate,
-   NOT real security — the backend API has no authentication yet (see
-   docs/DEMO.md, known limitations). Real auth means backend-issued tokens. */
+/* ---------- Login ----------
+   Real backend auth: POST /auth/login verifies the password (Argon2id hash)
+   and issues a JWT access token + httpOnly refresh cookie; the API itself
+   rejects unauthenticated calls. The demo account below is a seeded user in
+   the backend database. If the backend is unreachable, the same credentials
+   enter the offline demo-data mode so the console can still be explored. */
 const DEMO_ACCOUNT = { email: "admin@shieldnet.io", password: "shieldnet" };
 
-function Login({ onLogin }) {
+function Login({ onLogin, onDemoLogin }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
 
-  const submit = (e) => {
+  const submit = async (e) => {
     e.preventDefault();
-    if (email.trim().toLowerCase() === DEMO_ACCOUNT.email && password === DEMO_ACCOUNT.password) {
+    setBusy(true);
+    setError("");
+    try {
+      await apiLogin(email.trim().toLowerCase(), password);
       onLogin();
-    } else {
-      setError("Invalid email or password — use the demo credentials below.");
+    } catch (err) {
+      if (err.status === 401) {
+        setError("Invalid email or password — use the demo credentials below.");
+      } else if (err.status === 429) {
+        setError("Too many failed attempts — wait a few minutes and try again.");
+      } else if (email.trim().toLowerCase() === DEMO_ACCOUNT.email && password === DEMO_ACCOUNT.password) {
+        onDemoLogin(); // backend unreachable: offline demo-data mode
+      } else {
+        setError("Backend unreachable — check your connection, or use the demo credentials for offline demo mode.");
+      }
     }
+    setBusy(false);
   };
 
   return (
@@ -667,20 +681,43 @@ function Login({ onLogin }) {
             placeholder="••••••••" required />
         </label>
         {error && <p className="login-error">{error}</p>}
-        <button className="login-btn" type="submit">Sign In →</button>
+        <button className="login-btn" type="submit" disabled={busy}>{busy ? "Signing in…" : "Sign In →"}</button>
         <div className="login-hint">
           Demo account — email <code>admin@shieldnet.io</code> · password <code>shieldnet</code>
         </div>
-        <p className="muted small">Demo login gate for the console UI. The backend API is not protected by this sign-in yet.</p>
+        <p className="muted small">Sign-in is verified by the ShieldNet backend — passwords are Argon2id-hashed and the API requires a JWT. If the backend is offline, the demo account opens the console in demo-data mode.</p>
       </form>
     </div>
   );
 }
 
 export default function App() {
-  const [authed, setAuthed] = useState(() => sessionStorage.getItem("shieldnet-auth") === "1");
-  if (!authed) {
-    return <Login onLogin={() => { sessionStorage.setItem("shieldnet-auth", "1"); setAuthed(true); }} />;
+  // "checking" while we try to restore the session from the refresh cookie.
+  const [authState, setAuthState] = useState("checking");
+  const [demoSession, setDemoSession] = useState(false);
+
+  useEffect(() => {
+    refreshSession().then((ok) => setAuthState(ok ? "in" : "out"));
+  }, []);
+
+  if (authState === "checking" && !demoSession) {
+    return <div className="boot">Loading ShieldNet console…</div>;
   }
-  return <Dashboard onLogout={() => { sessionStorage.removeItem("shieldnet-auth"); setAuthed(false); }} />;
+  if (authState !== "in" && !demoSession) {
+    return (
+      <Login
+        onLogin={() => setAuthState("in")}
+        onDemoLogin={() => setDemoSession(true)}
+      />
+    );
+  }
+  return (
+    <Dashboard
+      onLogout={async () => {
+        await apiLogout();
+        setDemoSession(false);
+        setAuthState("out");
+      }}
+    />
+  );
 }

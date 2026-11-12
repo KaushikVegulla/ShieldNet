@@ -24,6 +24,27 @@ Free-tier notes: the web service sleeps after inactivity (first request
 takes ~30–60s to wake) and the free database is time-limited — fine for a
 demo, not for production.
 
+### Auth environment variables (existing service)
+
+The blueprint lists these, but an already-created Render service does not
+pick up new `render.yaml` entries by itself. Add them once in
+**Render → shieldnet-backend → Environment**:
+
+- `JWT_SECRET` — a long random string (the blueprint generates one on a
+  fresh apply; any password-generator output of 32+ characters works)
+- `AUTH_COOKIE_SECURE` = `true`
+- `AUTH_COOKIE_SAMESITE` = `none` (the dashboard is on a different site,
+  so the refresh cookie must be cross-site)
+- `CORS_ORIGINS` = `https://shieldnet-web.vercel.app,http://localhost:5173`
+- `INGEST_API_KEY` — optional but recommended: a random string. Once set,
+  `/ingest` and `/analyze` require that value in an `X-API-Key` header
+  (or a logged-in user's JWT, which is what the dashboard sends).
+
+Save → Render redeploys automatically. The seeded console user is
+`admin@shieldnet.io` / `shieldnet` (change via `ADMIN_EMAIL` /
+`ADMIN_PASSWORD` env vars **before first deploy**; afterwards change the
+password in the database).
+
 ## 2. Point the dashboard at it
 
 1. Vercel → project `shieldnet` → **Settings → Environment Variables**:
@@ -41,6 +62,9 @@ curl -X POST https://shieldnet-backend.onrender.com/analyze \
   -H 'Content-Type: application/json' \
   -d '{"method":"GET","uri":"/search?q='\'' UNION SELECT username, password FROM users --"}'
 ```
+
+If you set `INGEST_API_KEY` on the backend, add `-H 'X-API-Key: <value>'`
+to that curl — otherwise `/analyze` returns 401 (by design).
 
 ## 3. What runs where (be able to explain this)
 

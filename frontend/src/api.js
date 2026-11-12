@@ -5,8 +5,70 @@
 
 export const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 
-async function get(path) {
-  const resp = await fetch(`${API_BASE}${path}`);
+/* --- Auth session -------------------------------------------------------
+   The access token lives only in this module variable (never localStorage).
+   The refresh token is an httpOnly cookie set by the backend; the browser
+   sends it automatically on credentialed /auth calls. On a 401 we try one
+   silent refresh, then retry the original request. */
+
+let accessToken = null;
+
+export function hasAccessToken() {
+  return Boolean(accessToken);
+}
+
+function authHeaders() {
+  return accessToken ? { Authorization: `Bearer ${accessToken}` } : {};
+}
+
+async function postAuth(path, body) {
+  const resp = await fetch(`${API_BASE}${path}`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  return resp;
+}
+
+// Returns true when a session was restored/renewed.
+export async function refreshSession() {
+  try {
+    const resp = await postAuth("/auth/refresh");
+    if (!resp.ok) { accessToken = null; return false; }
+    accessToken = (await resp.json()).access_token;
+    return true;
+  } catch {
+    accessToken = null;
+    return false;
+  }
+}
+
+// Throws an Error with .status for HTTP failures; network failures have no
+// .status, which the login page uses to offer the offline demo mode.
+export async function apiLogin(email, password) {
+  const resp = await postAuth("/auth/login", { email, password });
+  if (!resp.ok) {
+    const err = new Error(`login -> ${resp.status}`);
+    err.status = resp.status;
+    try { err.detail = (await resp.json()).detail; } catch { /* keep status only */ }
+    throw err;
+  }
+  const body = await resp.json();
+  accessToken = body.access_token;
+  return body;
+}
+
+export async function apiLogout() {
+  try { await postAuth("/auth/logout"); } catch { /* session is dropped locally either way */ }
+  accessToken = null;
+}
+
+async function get(path, retried = false) {
+  const resp = await fetch(`${API_BASE}${path}`, { headers: authHeaders(), credentials: "include" });
+  if (resp.status === 401 && !retried && (await refreshSession())) {
+    return get(path, true);
+  }
   if (!resp.ok) throw new Error(`${path} -> ${resp.status}`);
   return resp.json();
 }
@@ -57,12 +119,16 @@ export const DEMO_DATA = {
 
 // Score one request against the live detection engine (POST /analyze).
 // Used by the Website Scanner view; throws when the backend is unreachable.
-export async function analyzeRequest(uri) {
+export async function analyzeRequest(uri, retried = false) {
   const resp = await fetch(`${API_BASE}/analyze`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    credentials: "include",
     body: JSON.stringify({ method: "GET", uri }),
   });
+  if (resp.status === 401 && !retried && (await refreshSession())) {
+    return analyzeRequest(uri, true);
+  }
   if (!resp.ok) throw new Error(`/analyze -> ${resp.status}`);
   return resp.json();
 }

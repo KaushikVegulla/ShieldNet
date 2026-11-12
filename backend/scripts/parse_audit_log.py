@@ -11,6 +11,7 @@ Usage:
 """
 import argparse
 import json
+import os
 import urllib.request
 
 
@@ -58,11 +59,14 @@ def load_transactions(path: str) -> list[dict]:
     return transactions
 
 
-def post_payload(backend: str, payload: dict) -> int:
+def post_payload(backend: str, payload: dict, api_key: str = "") -> int:
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["X-API-Key"] = api_key
     req = urllib.request.Request(
         f"{backend.rstrip('/')}/ingest",
         data=json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json"},
+        headers=headers,
         method="POST",
     )
     with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310 (own backend URL)
@@ -73,6 +77,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("audit_log", help="Path to the ModSecurity JSON audit log")
     parser.add_argument("--backend", default="http://localhost:8000")
+    parser.add_argument("--api-key", default=os.environ.get("SHIELDNET_API_KEY", ""),
+                        help="X-API-Key for backends with INGEST_API_KEY set (or env SHIELDNET_API_KEY)")
     parser.add_argument("--dry-run", action="store_true", help="Print payloads, don't POST")
     args = parser.parse_args()
 
@@ -83,7 +89,7 @@ def main() -> None:
         if args.dry_run:
             print(json.dumps(payload))
         else:
-            post_payload(args.backend, payload)
+            post_payload(args.backend, payload, args.api_key)
         sent += 1
     print(f"{sent} transaction(s) processed")
 
