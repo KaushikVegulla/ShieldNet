@@ -11,10 +11,14 @@ services:
     plan: free
     healthCheckPath: /health
     envVars:
+      # DATABASE_URL points at the Neon PostgreSQL project (free tier, no
+      # expiry) since 12 Nov 2026 — Render's free database expires after 30
+      # days. sync: false = the value is set by hand in the dashboard and
+      # blueprint applies must not overwrite it. The shieldnet-db resource
+      # below is the retired Render database (expires 11 Dec 2026); it is
+      # kept in the file only so a sync does not try to recreate wiring.
       - key: DATABASE_URL
-        fromDatabase:
-          name: shieldnet-db
-          property: connectionString
+        sync: false
       - key: RISK_MONITOR_THRESHOLD
         value: "40"
       - key: RISK_BLOCK_THRESHOLD
